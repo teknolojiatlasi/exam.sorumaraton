@@ -1,196 +1,25 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
+import { authRequest, request } from './api'
 import './App.css'
-
-type Page = 'login' | 'yonetim' | 'katilim' | 'cozum' | 'izleme' | 'sonuclar'
-type ExamStatus = 'DRAFT' | 'WAITING' | 'STARTED' | 'FINISHED'
-type ExamVisibility = 'PRIVATE' | 'PUBLIC' | 'HIDDEN'
-type QuestionType = 'MULTIPLE_CHOICE' | 'TRUE_FALSE' | 'TEXT' | 'IMAGE_BASED'
-type Role = 'ADMIN' | 'SINAVHAZIRLAMA' | 'KATILIMCI'
-
-type User = {
-  id: number
-  name: string
-  email: string
-  role: Role
-}
-
-type Exam = {
-  id: number
-  title: string
-  description?: string | null
-  duration: number
-  status: ExamStatus
-  visibility: ExamVisibility
-  joinCode: string
-  createdBy: number
-  startTime?: string | null
-  scheduledStartTime?: string | null
-  questionCount?: number
-}
-
-type QuestionOption = {
-  id: number
-  optionText: string
-  correct: boolean
-}
-
-type Question = {
-  id: number
-  questionText: string
-  questionType: QuestionType
-  imagePath?: string | null
-  orderNo: number
-  options: QuestionOption[]
-}
-
-type Participant = {
-  id: number
-  examId: number
-  userId?: number | null
-  nickname: string
-  email?: string | null
-  joinedAt: string
-  currentQuestionNo: number
-  progressPercent: number
-  lastSeenAt: string
-  finishedAt?: string | null
-}
-
-type Answer = {
-  id: number
-  participantId: number
-  questionId: number
-  selectedOptionId?: number | null
-  textAnswer?: string | null
-  correct?: boolean | null
-  answeredAt: string
-}
-
-type LeaderboardRow = {
-  participantId: number
-  nickname: string
-  score: number
-  finishMillis: number
-}
-
-type RealtimeEvent = {
-  type?: string
-  extendedMinutes?: number
-}
-
-type OptionDraft = {
-  optionText: string
-  correct: boolean
-}
-
-const API_BASE = '/api/exams'
-const AUTH_BASE = '/api/auth'
-const questionTypes: QuestionType[] = ['MULTIPLE_CHOICE', 'TRUE_FALSE', 'TEXT']
-const visibilities: ExamVisibility[] = ['PUBLIC', 'PRIVATE', 'HIDDEN']
-const roles: Role[] = ['SINAVHAZIRLAMA', 'KATILIMCI', 'ADMIN']
-
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    ...options,
-  })
-
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || `${response.status} ${response.statusText}`)
-  }
-
-  if (response.status === 204) return undefined as T
-  return response.json() as Promise<T>
-}
-
-async function authRequest<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${AUTH_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    ...options,
-  })
-
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || `${response.status} ${response.statusText}`)
-  }
-
-  return response.json() as Promise<T>
-}
-
-function routeFromHash(): Page {
-  const route = window.location.hash.replace('#/', '').split('?')[0] as Page
-  return ['login', 'yonetim', 'katilim', 'cozum', 'izleme', 'sonuclar'].includes(route) ? route : 'login'
-}
-
-function navigate(page: Page) {
-  window.location.hash = `/${page}`
-}
-
-function formatDate(value?: string | null) {
-  if (!value) return '-'
-  return new Intl.DateTimeFormat('tr-TR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(new Date(value))
-}
-
-function formatDuration(totalSeconds: number) {
-  const safeSeconds = Math.max(0, totalSeconds)
-  const minutes = Math.floor(safeSeconds / 60)
-  const seconds = safeSeconds % 60
-  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
-}
-
-function statusLabel(status: ExamStatus) {
-  const labels: Record<ExamStatus, string> = {
-    DRAFT: 'Taslak',
-    WAITING: 'Bekliyor',
-    STARTED: 'Başladı',
-    FINISHED: 'Bitti',
-  }
-  return labels[status]
-}
-
-function questionTypeLabel(type: QuestionType) {
-  const labels: Record<QuestionType, string> = {
-    MULTIPLE_CHOICE: 'Çoktan seçmeli',
-    TRUE_FALSE: 'Doğru / yanlış',
-    TEXT: 'Metin cevaplı',
-    IMAGE_BASED: 'Görselli soru',
-  }
-  return labels[type]
-}
-
-function visibilityLabel(visibility: ExamVisibility) {
-  const labels: Record<ExamVisibility, string> = {
-    PUBLIC: 'Herkes kullanabilsin',
-    PRIVATE: 'Sadece oluşturan erişsin',
-    HIDDEN: 'Gizli test',
-  }
-  return labels[visibility]
-}
-
-function createStompFrame(command: string, headers: Record<string, string> = {}, body = '') {
-  const headerText = Object.entries(headers)
-    .map(([key, value]) => `${key}:${value}`)
-    .join('\n')
-  return `${command}\n${headerText}\n\n${body}\0`
-}
-
-function parseStompMessages(data: string) {
-  return data
-    .split('\0')
-    .map((frame) => {
-      const separator = frame.indexOf('\n\n')
-      if (separator === -1) return null
-      const command = frame.slice(0, frame.indexOf('\n')).trim()
-      const body = frame.slice(separator + 2).trim()
-      return { command, body }
-    })
-    .filter(Boolean) as Array<{ command: string; body: string }>
-}
+import { questionTypes, roles, visibilities } from './constants'
+import { formatDate, formatDuration, questionTypeLabel, statusLabel, visibilityLabel } from './formatters'
+import { navigate, routeFromHash } from './navigation'
+import { createStompFrame, parseStompMessages } from './stomp'
+import type {
+  Answer,
+  Exam,
+  ExamVisibility,
+  LeaderboardRow,
+  OptionDraft,
+  Page,
+  Participant,
+  Question,
+  QuestionType,
+  RealtimeEvent,
+  Role,
+  User,
+} from './types'
 
 function App() {
   const [page, setPage] = useState<Page>(routeFromHash)
@@ -525,7 +354,7 @@ function App() {
           method: editingExamId ? 'PUT' : 'POST',
           body: JSON.stringify(payload),
         }),
-      editingExamId ? 'Sinav guncellendi.' : 'Sinav olusturuldu.',
+      editingExamId ? 'Sınav güncellendi.' : 'Sınav oluşturuldu.',
     )
     if (saved) {
       setExamForm({ ...examForm, title: '', description: '', scheduledStartTime: '' })
@@ -556,7 +385,7 @@ function App() {
             options,
           }),
         }),
-      editingQuestionId ? 'Soru guncellendi.' : 'Soru eklendi.',
+      editingQuestionId ? 'Soru güncellendi.' : 'Soru eklendi.',
     )
     if (saved) {
       setQuestionForm({ questionText: '', questionType: 'MULTIPLE_CHOICE', imagePath: '', orderNo: '' })
@@ -586,7 +415,7 @@ function App() {
   }
 
   async function deleteExam(examId: number) {
-    await run(() => request<void>(`/${examId}`, { method: 'DELETE' }), 'Sinav silindi.')
+    await run(() => request<void>(`/${examId}`, { method: 'DELETE' }), 'Sınav silindi.')
     if (selectedExamId === examId) {
       setSelectedExamId('')
       setQuestions([])
@@ -619,7 +448,7 @@ function App() {
   async function updateUserRole(userId: number, role: Role) {
     const user = await run(
       () => authRequest<User>(`/users/${userId}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }),
-      'Rol guncellendi.',
+      'Rol güncellendi.',
     )
     if (user) {
       setUsers((current) => current.map((item) => (item.id === user.id ? user : item)))
@@ -801,7 +630,7 @@ function App() {
           </div>
           {currentUser && (
             <button className="ghost-button" type="button" onClick={logout}>
-              Cikis
+              Çıkış
             </button>
           )}
           <button className="ghost-button" type="button" onClick={loadExams} disabled={loading}>
@@ -1058,19 +887,19 @@ function App() {
           </form>
 
           <section className="panel">
-            <h2>Test Sorulari</h2>
+            <h2>Test Soruları</h2>
             <div className="list">
-              {questions.length === 0 && <small>Secili testte soru yok.</small>}
+              {questions.length === 0 && <small>Seçili testte soru yok.</small>}
               {questions.map((question) => (
                 <div className="list-item editable-item" key={question.id}>
                   <span>{question.orderNo}</span>
                   <strong>{question.questionText}</strong>
                   <small>{questionTypeLabel(question.questionType)}</small>
                   <div className="item-actions">
-                    <button className="ghost-button" type="button" onClick={() => editQuestion(question)} disabled={!canPrepareExam || selectedExam?.status === 'STARTED' || selectedExam?.status === 'FINISHED'}>
-                      Duzenle
+                    <button className="ghost-button" type="button" onClick={() => editQuestion(question)} disabled={!canPrepareExam || !selectedExam}>
+                      Düzenle
                     </button>
-                    <button className="ghost-button danger-button" type="button" onClick={() => void deleteQuestion(question.id)} disabled={!canPrepareExam || selectedExam?.status === 'STARTED' || selectedExam?.status === 'FINISHED'}>
+                    <button className="ghost-button danger-button" type="button" onClick={() => void deleteQuestion(question.id)} disabled={!canPrepareExam || !selectedExam}>
                       Sil
                     </button>
                   </div>
@@ -1081,7 +910,7 @@ function App() {
 
           {currentUser?.role === 'ADMIN' && (
             <section className="panel">
-              <h2>Kullanici Rolleri</h2>
+              <h2>Kullanıcı Rolleri</h2>
               <div className="list">
                 {users.map((user) => (
                   <div className="list-item editable-item" key={user.id}>
@@ -1131,10 +960,10 @@ function App() {
                   <small>{exam.joinCode}</small>
                   <div className="item-actions">
                     <button className="ghost-button" type="button" onClick={() => setSelectedExamId(exam.id)}>
-                      Sec
+                      Seç
                     </button>
                     <button className="ghost-button" type="button" onClick={() => editExam(exam)} disabled={!canPrepareExam || exam.status === 'STARTED' || exam.status === 'FINISHED'}>
-                      Duzenle
+                      Düzenle
                     </button>
                     <button className="ghost-button danger-button" type="button" onClick={() => void deleteExam(exam.id)} disabled={!canPrepareExam || exam.status === 'STARTED' || exam.status === 'FINISHED'}>
                       Sil
