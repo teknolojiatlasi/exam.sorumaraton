@@ -5,6 +5,7 @@ import com.sorumaraton.exam.service.ExamService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import lombok.*;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.Instant;
@@ -29,6 +30,25 @@ public class ExamController {
         return ExamResponse.from(exam, examService.questionCount(exam.getId()));
     }
 
+    @PutMapping("/{examId}")
+    public ExamResponse update(@PathVariable Long examId, @Valid @RequestBody CreateExamRequest request) {
+        Exam exam = examService.updateExam(
+                examId,
+                request.title(),
+                request.description(),
+                request.duration(),
+                request.scheduledStartTime(),
+                request.visibility()
+        );
+        return ExamResponse.from(exam, examService.questionCount(exam.getId()));
+    }
+
+    @DeleteMapping("/{examId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable Long examId) {
+        examService.deleteExam(examId);
+    }
+
     @PostMapping("/{examId}/questions")
     public QuestionResponse addQuestion(@PathVariable Long examId, @Valid @RequestBody AddQuestionRequest request) {
         Question question = examService.addQuestion(
@@ -42,6 +62,27 @@ public class ExamController {
                         .toList()
         );
         return QuestionResponse.from(question);
+    }
+
+    @PutMapping("/questions/{questionId}")
+    public QuestionResponse updateQuestion(@PathVariable Long questionId, @Valid @RequestBody AddQuestionRequest request) {
+        Question question = examService.updateQuestion(
+                questionId,
+                request.questionText(),
+                request.questionType(),
+                request.imagePath(),
+                request.orderNo(),
+                request.options() == null ? List.of() : request.options().stream()
+                        .map(option -> new ExamService.QuestionOptionInput(option.optionText(), option.correct()))
+                        .toList()
+        );
+        return QuestionResponse.from(question);
+    }
+
+    @DeleteMapping("/questions/{questionId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteQuestion(@PathVariable Long questionId) {
+        examService.deleteQuestion(questionId);
     }
 
     @PostMapping("/{examId}/start")

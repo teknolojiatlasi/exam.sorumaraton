@@ -271,10 +271,27 @@ button:disabled {
   gap: 10px;
 }
 
-.action-row,
+.action-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.action-row:has(> input[type="number"]) {
+  grid-template-columns: 70px 1fr;
+}
+
+.action-row input[type="number"] {
+  max-width: 100%;
+}
+
 .answer-row,
 .option-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
   gap: 10px;
+  align-items: center;
 }
 
 .option-toolbar {
@@ -295,7 +312,26 @@ button:disabled {
 }
 
 .check-label input {
-  width: auto;
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0;
+  border: 2px solid var(--border) !important;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  cursor: pointer;
+  background: white;
+}
+
+.check-label input[type="radio"]:checked {
+  background: radial-gradient(circle at 40% 40%, #265a72 0%, #265a72 35%, transparent 35%);
+  border-color: #265a72;
+}
+
+.check-label input[type="radio"] {
+  border-radius: 50%;
 }
 
 .list-item {
@@ -307,6 +343,31 @@ button:disabled {
   color: var(--text);
   border: 1px solid var(--border);
   background: var(--surface-strong);
+}
+
+.editable-item {
+  grid-template-columns: auto 1fr auto;
+}
+
+.editable-item select {
+  min-width: 150px;
+}
+
+.item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.item-actions button {
+  padding: 7px 9px;
+}
+
+.danger-button {
+  color: #7c1d1d;
+  border-color: #f1b5b5;
+  background: #fff1f1;
 }
 
 .list-item strong,

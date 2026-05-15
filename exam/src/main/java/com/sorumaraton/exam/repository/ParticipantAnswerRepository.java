@@ -10,4 +10,6 @@ public interface ParticipantAnswerRepository extends JpaRepository<ParticipantAn
     Optional<ParticipantAnswer> findByParticipantIdAndQuestionId(Long participantId, Long questionId);
     List<ParticipantAnswer> findByParticipantExamId(Long examId);
     List<ParticipantAnswer> findByParticipantId(Long participantId);
+    void deleteByQuestionId(Long questionId);
+    void deleteByParticipantExamId(Long examId);
 }

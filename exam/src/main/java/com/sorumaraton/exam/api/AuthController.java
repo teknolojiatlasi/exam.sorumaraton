@@ -13,6 +13,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
@@ -46,6 +48,18 @@ public class AuthController {
         return UserResponse.from(user);
     }
 
+    @GetMapping("/users")
+    public List<UserResponse> users() {
+        return userRepository.findAll().stream().map(UserResponse::from).toList();
+    }
+
+    @PatchMapping("/users/{userId}/role")
+    public UserResponse updateRole(@PathVariable Long userId, @Valid @RequestBody RoleRequest request) {
+        User user = userRepository.findById(userId).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+        user.setRole(request.role());
+        return UserResponse.from(userRepository.save(user));
+    }
+
     public record RegisterRequest(
             @NotBlank String name,
             @NotBlank @Email String email,
@@ -54,6 +68,7 @@ public class AuthController {
     ) {}
 
     public record LoginRequest(@NotBlank @Email String email, @NotBlank String password) {}
+    public record RoleRequest(@NotNull Role role) {}
 
     public record UserResponse(Long id, String name, String email, Role role) {
         public static UserResponse from(User user) {

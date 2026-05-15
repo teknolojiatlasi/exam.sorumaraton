@@ -8,4 +8,5 @@ import java.util.List;
 public interface ParticipantRepository extends JpaRepository<Participant, Long> {
     List<Participant> findByExamIdOrderByJoinedAtAsc(Long examId);
     long countByExamId(Long examId);
+    void deleteByExamId(Long examId);
 }

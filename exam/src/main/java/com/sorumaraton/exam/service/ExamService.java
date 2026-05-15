@@ -45,9 +45,7 @@ public class ExamService {
     public Question addQuestion(Long examId, String questionText, QuestionType questionType, String imagePath,
                                 Integer orderNo, List<QuestionOptionInput> optionInputs) {
         Exam exam = examRepository.findById(examId).orElseThrow();
-        if (exam.getStatus() == ExamStatus.STARTED || exam.getStatus() == ExamStatus.FINISHED) {
-            throw new IllegalStateException("Started or finished exams cannot be edited.");
-        }
+        ensureEditable(exam);
 
         Question question = Question.builder()
                 .exam(exam)
@@ -69,6 +67,60 @@ public class ExamService {
         }
 
         return questionRepository.save(question);
+    }
+
+    @Transactional
+    public Exam updateExam(Long examId, String title, String description, Integer duration,
+                           Instant scheduledStartTime, ExamVisibility visibility) {
+        Exam exam = examRepository.findById(examId).orElseThrow();
+        ensureEditable(exam);
+        exam.setTitle(title);
+        exam.setDescription(description);
+        exam.setDuration(duration);
+        exam.setScheduledStartTime(scheduledStartTime);
+        exam.setVisibility(visibility == null ? ExamVisibility.PRIVATE : visibility);
+        return examRepository.save(exam);
+    }
+
+    @Transactional
+    public void deleteExam(Long examId) {
+        Exam exam = examRepository.findById(examId).orElseThrow();
+        ensureEditable(exam);
+        participantAnswerRepository.deleteByParticipantExamId(examId);
+        participantRepository.deleteByExamId(examId);
+        examSessionRepository.deleteByExamId(examId);
+        examRepository.delete(exam);
+    }
+
+    @Transactional
+    public Question updateQuestion(Long questionId, String questionText, QuestionType questionType, String imagePath,
+                                   Integer orderNo, List<QuestionOptionInput> optionInputs) {
+        Question question = questionRepository.findById(questionId).orElseThrow();
+        ensureEditable(question.getExam());
+        question.setQuestionText(questionText);
+        question.setQuestionType(questionType);
+        question.setImagePath(imagePath);
+        question.setOrderNo(orderNo == null ? question.getOrderNo() : orderNo);
+        question.getOptions().clear();
+        if (optionInputs != null) {
+            for (QuestionOptionInput input : optionInputs) {
+                QuestionOption option = QuestionOption.builder()
+                        .question(question)
+                        .optionText(input.optionText())
+                        .correct(Boolean.TRUE.equals(input.correct()))
+                        .build();
+                question.getOptions().add(option);
+            }
+        }
+        return questionRepository.save(question);
+    }
+
+    @Transactional
+    public void deleteQuestion(Long questionId) {
+        Question question = questionRepository.findById(questionId).orElseThrow();
+        ensureEditable(question.getExam());
+        participantAnswerRepository.deleteByQuestionId(questionId);
+        questionRepository.delete(question);
     }
 
     @Transactional
@@ -218,10 +270,7 @@ public class ExamService {
 
     @Transactional(readOnly = true)
     public List<Question> listQuestions(Long examId) {
-        Exam exam = examRepository.findById(examId).orElseThrow();
-        if (exam.getStatus() != ExamStatus.STARTED && exam.getStatus() != ExamStatus.FINISHED) {
-            throw new IllegalStateException("Questions are only visible after the exam starts.");
-        }
+        examRepository.findById(examId).orElseThrow();
         return questionRepository.findByExamIdOrderByOrderNoAsc(examId);
     }
 
@@ -251,6 +300,12 @@ public class ExamService {
                 .filter(Objects::nonNull)
                 .max(Integer::compareTo)
                 .orElse(0) + 1;
+    }
+
+    private void ensureEditable(Exam exam) {
+        if (exam.getStatus() == ExamStatus.STARTED || exam.getStatus() == ExamStatus.FINISHED) {
+            throw new IllegalStateException("Started or finished exams cannot be edited.");
+        }
     }
 
     private void updateProgressAfterAnswer(Participant participant, Question question) {

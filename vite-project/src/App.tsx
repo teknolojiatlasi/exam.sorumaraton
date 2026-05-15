@@ -196,6 +196,7 @@ function App() {
   const [page, setPage] = useState<Page>(routeFromHash)
   const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
+  const [users, setUsers] = useState<User[]>([])
   const [exams, setExams] = useState<Exam[]>([])
   const [selectedExamId, setSelectedExamId] = useState<number | ''>('')
   const [questions, setQuestions] = useState<Question[]>([])
@@ -210,6 +211,8 @@ function App() {
   const [remainingSeconds, setRemainingSeconds] = useState(0)
   const [localExtensionMinutes, setLocalExtensionMinutes] = useState(0)
   const [securityEvents, setSecurityEvents] = useState<string[]>([])
+  const [editingExamId, setEditingExamId] = useState<number | null>(null)
+  const [editingQuestionId, setEditingQuestionId] = useState<number | null>(null)
 
   const [examForm, setExamForm] = useState({
     title: '',
@@ -279,19 +282,19 @@ function App() {
     }
   }
 
+  async function loadUsers() {
+    const data = await run(() => authRequest<User[]>('/users'))
+    if (data) setUsers(data)
+  }
+
   async function loadExamDetails(examId: number) {
-    const shouldLoadQuestions = exams.find((exam) => exam.id === examId)?.status
-    const isParticipantPage = page === 'cozum' && joinedParticipant
     const [questionData, participantData, leaderboardData] = await Promise.all([
-      (shouldLoadQuestions === 'STARTED' || shouldLoadQuestions === 'FINISHED' || isParticipantPage)
-        ? run(() => request<Question[]>(`/${examId}/questions`))
-        : Promise.resolve(undefined),
+      run(() => request<Question[]>(`/${examId}/questions`)),
       run(() => request<Participant[]>(`/${examId}/participants`)),
       run(() => request<LeaderboardRow[]>(`/${examId}/leaderboard`)),
     ])
 
     if (questionData) setQuestions(questionData)
-    if (!questionData && shouldLoadQuestions !== 'STARTED' && shouldLoadQuestions !== 'FINISHED' && !isParticipantPage) setQuestions([])
     if (participantData) setParticipants(participantData)
     if (leaderboardData) setLeaderboard(leaderboardData)
   }
@@ -318,6 +321,7 @@ function App() {
 
   useEffect(() => {
     const timeout = window.setTimeout(() => void loadExams(), 0)
+    void loadUsers()
     return () => window.clearTimeout(timeout)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -503,6 +507,134 @@ function App() {
     }
   }
 
+  async function upsertExam(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const payload = {
+      title: examForm.title,
+      description: examForm.description || null,
+      duration: examForm.duration,
+      scheduledStartTime: examForm.scheduledStartTime
+        ? new Date(examForm.scheduledStartTime).toISOString()
+        : null,
+      visibility: examForm.visibility,
+      createdBy: currentUser?.id ?? examForm.createdBy,
+    }
+    const saved = await run(
+      () =>
+        request<Exam>(editingExamId ? `/${editingExamId}` : '', {
+          method: editingExamId ? 'PUT' : 'POST',
+          body: JSON.stringify(payload),
+        }),
+      editingExamId ? 'Sinav guncellendi.' : 'Sinav olusturuldu.',
+    )
+    if (saved) {
+      setExamForm({ ...examForm, title: '', description: '', scheduledStartTime: '' })
+      setEditingExamId(null)
+      await loadExams()
+      setSelectedExamId(saved.id)
+    }
+  }
+
+  async function upsertQuestion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!selectedExam) return
+    const options =
+      questionForm.questionType === 'TEXT'
+        ? []
+        : optionDrafts
+            .filter((option) => option.optionText.trim())
+            .map((option) => ({ optionText: option.optionText.trim(), correct: option.correct }))
+    const saved = await run(
+      () =>
+        request<Question>(editingQuestionId ? `/questions/${editingQuestionId}` : `/${selectedExam.id}/questions`, {
+          method: editingQuestionId ? 'PUT' : 'POST',
+          body: JSON.stringify({
+            questionText: questionForm.questionText,
+            questionType: questionForm.questionType,
+            imagePath: questionForm.imagePath || null,
+            orderNo: questionForm.orderNo ? Number(questionForm.orderNo) : null,
+            options,
+          }),
+        }),
+      editingQuestionId ? 'Soru guncellendi.' : 'Soru eklendi.',
+    )
+    if (saved) {
+      setQuestionForm({ questionText: '', questionType: 'MULTIPLE_CHOICE', imagePath: '', orderNo: '' })
+      setOptionDrafts([
+        { optionText: 'A', correct: true },
+        { optionText: 'B', correct: false },
+        { optionText: 'C', correct: false },
+        { optionText: 'D', correct: false },
+      ])
+      setEditingQuestionId(null)
+      await loadExamDetails(selectedExam.id)
+      await loadExams()
+    }
+  }
+
+  function editExam(exam: Exam) {
+    setEditingExamId(exam.id)
+    setSelectedExamId(exam.id)
+    setExamForm({
+      title: exam.title,
+      description: exam.description ?? '',
+      duration: exam.duration,
+      scheduledStartTime: exam.scheduledStartTime ? exam.scheduledStartTime.slice(0, 16) : '',
+      visibility: exam.visibility,
+      createdBy: exam.createdBy,
+    })
+  }
+
+  async function deleteExam(examId: number) {
+    await run(() => request<void>(`/${examId}`, { method: 'DELETE' }), 'Sinav silindi.')
+    if (selectedExamId === examId) {
+      setSelectedExamId('')
+      setQuestions([])
+    }
+    await loadExams()
+  }
+
+  function editQuestion(question: Question) {
+    setEditingQuestionId(question.id)
+    setQuestionForm({
+      questionText: question.questionText,
+      questionType: question.questionType,
+      imagePath: question.imagePath ?? '',
+      orderNo: question.orderNo?.toString() ?? '',
+    })
+    setOptionDrafts(
+      question.options.length > 0
+        ? question.options.map((option) => ({ optionText: option.optionText, correct: option.correct }))
+        : [{ optionText: '', correct: false }],
+    )
+  }
+
+  async function deleteQuestion(questionId: number) {
+    if (!selectedExam) return
+    await run(() => request<void>(`/questions/${questionId}`, { method: 'DELETE' }), 'Soru silindi.')
+    await loadExamDetails(selectedExam.id)
+    await loadExams()
+  }
+
+  async function updateUserRole(userId: number, role: Role) {
+    const user = await run(
+      () => authRequest<User>(`/users/${userId}/role`, { method: 'PATCH', body: JSON.stringify({ role }) }),
+      'Rol guncellendi.',
+    )
+    if (user) {
+      setUsers((current) => current.map((item) => (item.id === user.id ? user : item)))
+      if (currentUser?.id === user.id) setCurrentUser(user)
+    }
+  }
+
+  function logout() {
+    setCurrentUser(null)
+    setJoinedParticipant(null)
+    setAnswers({})
+    setSecurityEvents([])
+    navigate('login')
+  }
+
   async function updateExamStatus(action: 'start' | 'finish') {
     if (!selectedExam) return
     await run(
@@ -564,6 +696,7 @@ function App() {
     if (user) {
       setCurrentUser(user)
       setExamForm((current) => ({ ...current, createdBy: user.id }))
+      await loadUsers()
       navigate(user.role === 'KATILIMCI' ? 'katilim' : 'yonetim')
     }
   }
@@ -636,6 +769,9 @@ function App() {
     ])
   }
 
+  void createExam
+  void addQuestion
+
   const pageTitle: Record<Page, string> = {
     login: 'Giriş',
     yonetim: 'Sınav Yönetimi',
@@ -663,6 +799,11 @@ function App() {
             <strong>{realtimeStatus}</strong>
             <span>Yenileme: 10 sn</span>
           </div>
+          {currentUser && (
+            <button className="ghost-button" type="button" onClick={logout}>
+              Cikis
+            </button>
+          )}
           <button className="ghost-button" type="button" onClick={loadExams} disabled={loading}>
             Yenile
           </button>
@@ -798,7 +939,7 @@ function App() {
 
       {page === 'yonetim' && (
         <section className="layout">
-          <form className="panel" onSubmit={createExam}>
+          <form className="panel" onSubmit={upsertExam}>
             <div className="section-heading">
               <h2>Sınav Oluştur</h2>
               {!canPrepareExam && <small>Sınav oluşturmak için SINAVHAZIRLAMA rolü gerekir.</small>}
@@ -855,7 +996,7 @@ function App() {
             </button>
           </form>
 
-          <form className="panel" onSubmit={addQuestion}>
+          <form className="panel" onSubmit={upsertQuestion}>
             <h2>Soru Ekle</h2>
             <label>
               Soru metni
@@ -903,8 +1044,8 @@ function App() {
                   <div className="option-row" key={index}>
                     <input placeholder={`Seçenek ${index + 1}`} value={option.optionText} onChange={(event) => updateOption(index, { optionText: event.target.value })} />
                     <label className="check-label">
-                      <input type="checkbox" checked={option.correct} onChange={(event) => updateOption(index, { correct: event.target.checked })} />
-                      Doğru
+                      <input type="radio" name={`correct-answer-${selectedExamId}`} checked={option.correct} onChange={(event) => updateOption(index, { correct: event.target.checked })} />
+                      Doğru Cevap
                     </label>
                   </div>
                 ))}
@@ -915,6 +1056,50 @@ function App() {
               Soruyu Kaydet
             </button>
           </form>
+
+          <section className="panel">
+            <h2>Test Sorulari</h2>
+            <div className="list">
+              {questions.length === 0 && <small>Secili testte soru yok.</small>}
+              {questions.map((question) => (
+                <div className="list-item editable-item" key={question.id}>
+                  <span>{question.orderNo}</span>
+                  <strong>{question.questionText}</strong>
+                  <small>{questionTypeLabel(question.questionType)}</small>
+                  <div className="item-actions">
+                    <button className="ghost-button" type="button" onClick={() => editQuestion(question)} disabled={!canPrepareExam || selectedExam?.status === 'STARTED' || selectedExam?.status === 'FINISHED'}>
+                      Duzenle
+                    </button>
+                    <button className="ghost-button danger-button" type="button" onClick={() => void deleteQuestion(question.id)} disabled={!canPrepareExam || selectedExam?.status === 'STARTED' || selectedExam?.status === 'FINISHED'}>
+                      Sil
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {currentUser?.role === 'ADMIN' && (
+            <section className="panel">
+              <h2>Kullanici Rolleri</h2>
+              <div className="list">
+                {users.map((user) => (
+                  <div className="list-item editable-item" key={user.id}>
+                    <span>#{user.id}</span>
+                    <strong>{user.name}</strong>
+                    <small>{user.email}</small>
+                    <select value={user.role} onChange={(event) => void updateUserRole(user.id, event.target.value as Role)}>
+                      {roles.map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className="panel">
             <h2>Sınav İşlemleri</h2>
@@ -940,11 +1125,22 @@ function App() {
             )}
             <div className="list">
               {exams.map((exam) => (
-                <button className="list-item" type="button" key={exam.id} onClick={() => setSelectedExamId(exam.id)}>
+                <div className="list-item editable-item" key={exam.id}>
                   <span>#{exam.id}</span>
                   <strong>{exam.title}</strong>
                   <small>{exam.joinCode}</small>
-                </button>
+                  <div className="item-actions">
+                    <button className="ghost-button" type="button" onClick={() => setSelectedExamId(exam.id)}>
+                      Sec
+                    </button>
+                    <button className="ghost-button" type="button" onClick={() => editExam(exam)} disabled={!canPrepareExam || exam.status === 'STARTED' || exam.status === 'FINISHED'}>
+                      Duzenle
+                    </button>
+                    <button className="ghost-button danger-button" type="button" onClick={() => void deleteExam(exam.id)} disabled={!canPrepareExam || exam.status === 'STARTED' || exam.status === 'FINISHED'}>
+                      Sil
+                    </button>
+                  </div>
+                </div>
               ))}
             </div>
           </section>
